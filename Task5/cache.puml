@@ -1,0 +1,44 @@
+@startuml
+title MES: чтение списка заказов и изменение статуса с кешированием
+
+actor "Оператор" as Operator
+participant "MES UI" as UI
+participant "MES API" as API
+database "Redis Cache" as Redis
+database "MES DB" as DB
+
+== Чтение списка заказов ==
+
+Operator -> UI: Открывает дашборд заказов
+UI -> API: GET /orders?status=MANUFACTURING_APPROVED&page=1
+API -> Redis: GET mes:orders:status:MANUFACTURING_APPROVED:page:1
+
+alt Cache hit
+    Redis --> API: Список заказов
+    API --> UI: 200 OK + список заказов
+    UI --> Operator: Показывает заказы
+else Cache miss
+    Redis --> API: Данных нет
+    API -> DB: SELECT orders WHERE status = MANUFACTURING_APPROVED
+    DB --> API: Список заказов
+    API -> Redis: SET key + TTL 30s
+    API --> UI: 200 OK + список заказов
+    UI --> Operator: Показывает заказы
+end
+
+== Изменение статуса заказа ==
+
+Operator -> UI: Берёт заказ в работу
+UI -> API: POST /orders/{orderId}/start
+API -> DB: UPDATE order SET status = MANUFACTURING_STARTED
+DB --> API: OK
+
+API -> Redis: DELETE mes:orders:status:MANUFACTURING_APPROVED:*
+API -> Redis: DELETE mes:orders:status:MANUFACTURING_STARTED:*
+API -> Redis: DELETE mes:orders:dashboard:status-counts
+API -> Redis: DELETE mes:order:{orderId}
+
+API --> UI: 200 OK
+UI --> Operator: Заказ взят в работу
+
+@enduml
